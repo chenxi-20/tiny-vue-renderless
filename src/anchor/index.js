@@ -10,7 +10,7 @@
 *
 */
 
-import { addClass, on, off } from '@opentiny/vue-renderless/common/deps/dom'
+import { addClass, removeClass, on, off } from '@opentiny/vue-renderless/common/deps/dom'
 
 const setLinkList = ({ props, state }) => {
   JSON.stringify(props.links, (key, val) => {
@@ -29,7 +29,10 @@ const setFixAnchor = ({ vm }) => {
   }
 }
 
-const getScreenHeight = () => window.screen.height
+// const setScrollContainer = (api) => {
+//   const container = api.getContainer()
+//   addClass(container, 'tiny-anchor-scroll-container')
+// }
 
 const updateSkidPosition = ({ vm, state }) => {
   const activeEl = document.querySelector(`a[href='${state.currentLink}']`)
@@ -60,14 +63,83 @@ const getCurrentAnchor = ({ vm, state, currentLink }) => {
   updateSkidPosition({ vm, state })
 }
 
-export const getContainer = ({ props }) => () => props.setContainer || window.document || window
+const easeInFunc = ({ begin, t, x }) => begin + (t / 2) * x * x * x
+
+const easeOutFunc = ({ begin, t, x }) => begin + t * (2 + x * x * x)
+
+const easeInOutFunc = ({ curtime, begin, end, duration }) => {
+  const t = (end - begin) / 2
+  let x = curtime * 2 / duration
+  if (x < 1) {
+    return easeInFunc({ begin, t, x })
+  } else {
+    x -= 2
+    return easeOutFunc({ begin, t, x })
+  }
+}
+
+const scrollTo = ({ state, offsetTop, scrollTop, currentContainer }) => {
+  const startTime = Date.now()
+  const duration = 400
+  const delay = state.delay + 20
+  let timer = null
+
+  const swipeFunc = () => {
+    const endTime = Date.now()
+    const time = endTime - startTime
+    const curtime = time > duration ? duration : time
+    const begin = scrollTop
+    const end = offsetTop
+    const swipeScrollTop = easeInOutFunc({ curtime, begin, end, duration })
+    currentContainer.scrollTop = swipeScrollTop
+
+    if (time < duration) {
+      timer = setTimeout(() => {
+        swipeFunc()
+      }, 20)
+    } else {
+      timer = setTimeout(() => {
+        state.isScrolling = false
+        clearTimeout(timer)
+        timer = null
+      }, delay)
+    }
+  }
+  swipeFunc()
+}
+
+const getOffsetTopBottom = ({ props, linkEl }) => {
+  const { top: linkElTop, bottom: linkElBottom } = linkEl.getBoundingClientRect()
+  const container = props.setContainer()
+  if (!container || container === window.document) {
+    return { top: linkElTop, bottom: linkElBottom }
+  }
+
+  const { top: containerTop } = container.getBoundingClientRect()
+  const top = linkElTop - containerTop
+  const bottom = linkElBottom - containerTop
+  return { top, bottom }
+}
+
+export const getContainer = ({ props }) => () => props.setContainer() || window.document
+
+export const setVisibleDivide = ({ props, state }) => () => {
+  const container = props.setContainer()
+  if (container && container !== window.document) {
+    state.visibleDivide = container.clientHeight / 3
+  } else {
+    state.visibleDivide = document.documentElement.clientHeight / 3
+  }
+}
 
 export const mounted = ({ vm, props, state, api }) => () => {
   state.scrollContainer = api.getContainer()
   setLinkList({ props, state })
   setFixAnchor({ vm })
+  // setScrollContainer(api)
   state.scrollEvent = on(state.scrollContainer, 'scroll', api.debounceMouseScroll)
   api.debounceMouseScroll()
+  api.setVisibleDivide()
 }
 
 export const updated = ({ state, api }) => () => {
@@ -78,6 +150,7 @@ export const updated = ({ state, api }) => () => {
       state.scrollContainer = currentContainer
       state.scrollEvent = on(state.scrollContainer, 'scroll', api.debounceMouseScroll)
       api.debounceMouseScroll()
+      api.setVisibleDivide()
     }
   }
 }
@@ -86,18 +159,17 @@ export const unmounted = ({ state, api }) => () => {
   state.scrollEvent = off(state.scrollContainer, 'scroll', api.debounceMouseScroll)
 }
 
-export const debounceMouseScroll = ({ vm, state }) => () => {
+export const debounceMouseScroll = ({ vm, state, props }) => () => {
   if (state.isScrolling) {
     state.isScrolling = false
     return
   }
 
   let currentLink = null
-  let visibleArea = getScreenHeight() / 3
   const linkListPosition = []
   state.linkList.forEach(link => {
     const linkEl = document.querySelector(link)
-    const { top, bottom } = linkEl.getBoundingClientRect()
+    const { top, bottom } = getOffsetTopBottom({ props, linkEl })
     linkListPosition.push({
       link,
       top,
@@ -106,7 +178,7 @@ export const debounceMouseScroll = ({ vm, state }) => () => {
   })
   currentLink = linkListPosition[0]
   for (let i = 1; i < linkListPosition.length; i++) {
-    if (linkListPosition[i].top <= visibleArea && linkListPosition[i].bottom >= visibleArea) {
+    if (linkListPosition[i].top <= state.visibleDivide && linkListPosition[i].bottom >= state.visibleDivide) {
       currentLink = linkListPosition[i]
     }
   }
@@ -114,11 +186,35 @@ export const debounceMouseScroll = ({ vm, state }) => () => {
   getCurrentAnchor({ vm, state, currentLink })
 }
 
-export const linkClick = ({ state, vm }) => (e, item) => {
+export const linkClick = ({ state, vm, props, api, emit }) => (e, item) => {
+  emit('linkClick', e)
   if (state.isScrolling) {
     return
   }
+
+  const container = props.setContainer()
   state.currentLink = item.link
   updateSkidPosition({ vm, state })
-  state.isScrolling = true
+
+  if (container && container !== window.document) {
+    const LinkEl = container.querySelector(item.link)
+    LinkEl && api.handleScroll()
+  } else {
+    state.isScrolling = true
+  }
+}
+
+export const handleScroll = ({ state, api }) => () => {
+  const currentContainer = api.getContainer()
+  if (state.currentLink) {
+    state.isScrolling = true
+    const activeContentEl = currentContainer.querySelector(`${state.currentLink}`)
+    addClass(activeContentEl, 'is-current')
+    setTimeout(() => {
+      removeClass(activeContentEl, 'is-current')
+    }, 1000)
+    const scrollTop = currentContainer.scrollTop
+    const { offsetTop } = activeContentEl
+    scrollTo({ state, api, offsetTop, scrollTop, currentContainer })
+  }
 }

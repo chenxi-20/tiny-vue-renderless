@@ -11,18 +11,20 @@
 */
 
 import debounce from '@opentiny/vue-renderless/common/deps/debounce'
-import { mounted, updated, unmounted, debounceMouseScroll, getContainer, linkClick } from './index'
+import { mounted, updated, unmounted, debounceMouseScroll, getContainer, linkClick, handleScroll, setVisibleDivide } from './index'
 
-export const api = ['state', 'debounceMouseScroll', 'getContainer', 'linkClick']
+export const api = ['state', 'debounceMouseScroll', 'getContainer', 'linkClick', 'handleScroll', 'setVisibleDivide']
 
-export const renderless = (props, { onMounted, onUnmounted, onUpdated, reactive }, { vm }) => {
+export const renderless = (props, { onMounted, onUnmounted, onUpdated, reactive }, { vm, emit }) => {
   const api = {}
   const state = reactive({
     currentLink: '',
+    scrollContainer: null,
     scrollEvent: null,
     isScrolling: false,
     linkList: [],
-    delay: 200
+    delay: 200,
+    visibleDivide: 0
   })
 
   Object.assign(api, {
@@ -30,9 +32,11 @@ export const renderless = (props, { onMounted, onUnmounted, onUpdated, reactive 
     mounted: mounted({ vm, props, state, api }),
     updated: updated({ state, api }),
     unmounted: unmounted({ state, api }),
-    debounceMouseScroll: debounce(state.delay, debounceMouseScroll({ vm, state, api })),
+    debounceMouseScroll: debounce(state.delay, debounceMouseScroll({ vm, state, props })),
     getContainer: getContainer({ props }),
-    linkClick: linkClick({ state, vm })
+    linkClick: linkClick({ state, vm, props, api, emit }),
+    handleScroll: handleScroll({ state, api }),
+    setVisibleDivide: setVisibleDivide({ props, state })
   })
 
   onMounted(api.mounted)
@@ -41,4 +45,3 @@ export const renderless = (props, { onMounted, onUnmounted, onUpdated, reactive 
 
   return api
 }
-
